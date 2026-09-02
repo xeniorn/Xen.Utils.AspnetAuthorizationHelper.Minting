@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Util.AuthorizationHelper.Minting/Util.AuthorizationHelper.Minting.csproj" />
+  <Project Path="Util.AuthorizationHelper.Minting.Test/Util.AuthorizationHelper.Minting.Test.csproj" />
+</Solution>
