@@ -41,6 +41,7 @@ public static class DIHelper
         string scope,
         Action<MintingOptions>? configureMinting = null,
         Action<SubjectSelectorExtractor.MyOptions>? configureSubjects = null,
+        Action<ApiKeyAlgorithmNaming>? configureAlgorithmNaming = null,
         string keyPrefix = "")
         where TStandard : IInternalAuthStandard
         where TApiKeyStandard : ISpecApiAuthStandards
@@ -62,6 +63,11 @@ public static class DIHelper
         configureSubjects?.Invoke(subjectOptions);
         builder.Services.TryAddSingleton(new SubjectSelectorExtractor(subjectOptions));
         builder.Services.TryAddSingleton<MintingCallerFactory<TStandard>>();
+
+        // how stored hashes name their algorithm; the default covers the digests the v2026 standard declares
+        var naming = new ApiKeyAlgorithmNaming();
+        configureAlgorithmNaming?.Invoke(naming);
+        builder.Services.TryAddSingleton(naming);
 
         builder.Services.TryAddSingleton<IApiKeyHasher, StandardApiKeyHasher<TApiKeyStandard>>();
         builder.Services.TryAddSingleton<IApiKeyGenerator>(_ => new Base64UrlApiKeyGenerator(keyPrefix));

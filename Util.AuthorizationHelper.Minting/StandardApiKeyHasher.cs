@@ -14,12 +14,13 @@ namespace Util.AuthorizationHelper.Minting;
 /// failure - keys that authenticate but match nothing - looks nothing like its cause.
 /// </para>
 /// <para>
-/// The algorithm ids are the digests' claim types, which is what makes the round trip work: a key stored under
-/// one records that claim type, and the extractor finds it again by the claim of the same type on the identity.
+/// A stored hash is recorded against the algorithm that made it - <c>sha256</c>, <c>md5</c> - which is what
+/// <see cref="ApiKeyAlgorithmNaming"/> supplies. The digest is still found by walking the standard's own list, so
+/// the round trip holds: the same digest that produced the stored hash is the one that produces the claim.
 /// </para>
 /// </remarks>
 /// <typeparam name="TApiKeyStandard">The api key standard the host registered.</typeparam>
-public sealed class StandardApiKeyHasher<TApiKeyStandard> : IApiKeyHasher
+public sealed class StandardApiKeyHasher<TApiKeyStandard>(ApiKeyAlgorithmNaming naming) : IApiKeyHasher
     where TApiKeyStandard : ISpecApiAuthStandards
 {
     private static IReadOnlyCollection<ApiKeyDigest> Digests => ISpecApiAuthStandards.DigestsOf<TApiKeyStandard>();
@@ -28,17 +29,17 @@ public sealed class StandardApiKeyHasher<TApiKeyStandard> : IApiKeyHasher
     /// The standard's primary digest, so a key minted without asking for one uses whatever the standard leads
     /// with - sha256 for the v2026 standard, not the legacy digest it also still emits.
     /// </summary>
-    public string DefaultAlgorithmId => TApiKeyStandard.DefaultClaimType;
+    public string DefaultAlgorithmId => naming.IdFor(TApiKeyStandard.DefaultClaimType);
 
     /// <inheritdoc />
-    public IReadOnlyCollection<string> AlgorithmIds { get; } = [.. Digests.Select(x => x.ClaimType)];
+    public IReadOnlyCollection<string> AlgorithmIds => [.. Digests.Select(naming.IdFor)];
 
     /// <inheritdoc />
     public string Hash(string apiKey, string? algorithmId = null)
     {
         var wanted = algorithmId ?? DefaultAlgorithmId;
 
-        var digest = Digests.FirstOrDefault(x => string.Equals(x.ClaimType, wanted, StringComparison.Ordinal))
+        var digest = Digests.FirstOrDefault(x => string.Equals(naming.IdFor(x), wanted, StringComparison.Ordinal))
             ?? throw new ArgumentOutOfRangeException(nameof(algorithmId), wanted,
                 $"Not a digest of this standard. Known: {string.Join(", ", AlgorithmIds)}.");
 

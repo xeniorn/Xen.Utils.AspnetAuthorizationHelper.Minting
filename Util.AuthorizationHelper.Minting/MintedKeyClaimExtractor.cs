@@ -29,6 +29,7 @@ namespace Util.AuthorizationHelper.Minting;
 public sealed class MintedKeyClaimExtractor<TStandard, TApiKeyStandard>(
     MintedKeyAuthorizer authorizer,
     MintedKeyClaimExtractor<TStandard, TApiKeyStandard>.MyOptions options,
+    ApiKeyAlgorithmNaming naming,
     ILogger<MintedKeyClaimExtractor<TStandard, TApiKeyStandard>>? logger = null)
     : SpecApiKeyClaimExtractor<TStandard, TApiKeyStandard>(options)
     where TStandard : IInternalAuthStandard
@@ -54,14 +55,15 @@ public sealed class MintedKeyClaimExtractor<TStandard, TApiKeyStandard>(
     {
         // the standard may emit several digests of one key, and a stored key records which it was written under,
         // so all of them are offered and the store decides which - if any - identifies a key it holds
-        var digestClaimTypes = ISpecApiAuthStandards.DigestsOf<TApiKeyStandard>()
-            .Select(x => x.ClaimType)
-            .ToHashSet(StringComparer.Ordinal);
+        // claim type is where a digest travels; algorithm id is what the store wrote next to the hash. They are
+        // different strings for the same digest, so the claim has to be translated before the store is asked.
+        var algorithmIdByClaimType = ISpecApiAuthStandards.DigestsOf<TApiKeyStandard>()
+            .ToDictionary(x => x.ClaimType, naming.IdFor, StringComparer.Ordinal);
 
         var presented = identities
             .SelectMany(x => x.Claims)
-            .Where(x => digestClaimTypes.Contains(x.Type))
-            .Select(x => new PresentedApiKeyDigest(x.Type, x.Value))
+            .Where(x => algorithmIdByClaimType.ContainsKey(x.Type))
+            .Select(x => new PresentedApiKeyDigest(algorithmIdByClaimType[x.Type], x.Value))
             .Distinct()
             .ToArray();
 

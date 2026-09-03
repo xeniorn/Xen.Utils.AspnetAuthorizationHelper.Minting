@@ -38,7 +38,7 @@ public class StandardApiKeyHasherTests
     {
         var apiKey = new Base64UrlApiKeyGenerator("ptk_").Generate();
 
-        var stored = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>().Hash(apiKey);
+        var stored = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>(new ApiKeyAlgorithmNaming()).Hash(apiKey);
 
         Assert.Equal(PrimaryClaimValueFromHandler<SpecApiAuthStandardsV2026>(apiKey), stored);
     }
@@ -48,7 +48,7 @@ public class StandardApiKeyHasherTests
     {
         var apiKey = new Base64UrlApiKeyGenerator("ptk_").Generate();
 
-        var stored = new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>().Hash(apiKey);
+        var stored = new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>(new ApiKeyAlgorithmNaming()).Hash(apiKey);
 
         Assert.Equal(PrimaryClaimValueFromHandler<SpecApiAuthStandardsV2026_Md5>(apiKey), stored);
     }
@@ -61,8 +61,8 @@ public class StandardApiKeyHasherTests
     public void DefaultAlgorithmIdDistinguishesTheDigests()
     {
         Assert.NotEqual(
-            new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>().DefaultAlgorithmId,
-            new StandardApiKeyHasher<SpecApiAuthStandardsV2026>().DefaultAlgorithmId);
+            new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>(new ApiKeyAlgorithmNaming()).DefaultAlgorithmId,
+            new StandardApiKeyHasher<SpecApiAuthStandardsV2026>(new ApiKeyAlgorithmNaming()).DefaultAlgorithmId);
     }
 
     /// <summary>
@@ -74,7 +74,7 @@ public class StandardApiKeyHasherTests
     public void EveryDigestOfTheStandardHashesToItsOwnClaim()
     {
         var apiKey = new Base64UrlApiKeyGenerator("ptk_").Generate();
-        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>();
+        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>(new ApiKeyAlgorithmNaming());
 
         var request = new DefaultHttpRequest(new DefaultHttpContext())
         {
@@ -84,12 +84,16 @@ public class StandardApiKeyHasherTests
             .GetAuthenticationTicketFromRequest(request, NullLogger.Instance)!
             .Principal.Identities.Single().Claims.ToArray();
 
+        var naming = new ApiKeyAlgorithmNaming();
+
         Assert.Equal(2, hasher.AlgorithmIds.Count);
 
-        foreach (var algorithmId in hasher.AlgorithmIds)
+        // the algorithm id names the algorithm and the claim type says where it travels, so the correspondence
+        // runs through the digest rather than through one string used as both
+        foreach (var digest in ISpecApiAuthStandards.DigestsOf<SpecApiAuthStandardsV2026>())
         {
-            var emitted = claims.Single(x => x.Type == algorithmId).Value;
-            Assert.Equal(emitted, hasher.Hash(apiKey, algorithmId));
+            var emitted = claims.Single(x => x.Type == digest.ClaimType).Value;
+            Assert.Equal(emitted, hasher.Hash(apiKey, naming.IdFor(digest)));
         }
     }
 
@@ -97,7 +101,7 @@ public class StandardApiKeyHasherTests
     [Fact]
     public void HashingUnderAnUnknownAlgorithm_Throws()
     {
-        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>();
+        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>(new ApiKeyAlgorithmNaming());
 
         Assert.Throws<ArgumentOutOfRangeException>(() => hasher.Hash("ptk_whatever", "sha3-nope"));
     }
@@ -106,10 +110,10 @@ public class StandardApiKeyHasherTests
     [Fact]
     public void DefaultAlgorithmIsThePrimaryDigest()
     {
-        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>();
+        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>(new ApiKeyAlgorithmNaming());
 
-        Assert.Equal(SpecApiAuthStandardsV2026.Sha256.ClaimType, hasher.DefaultAlgorithmId);
-        Assert.Contains(SpecApiAuthStandardsV2026_Md5.MyDefaultClaimType, hasher.AlgorithmIds);
+        Assert.Equal(ApiKeyAlgorithmNaming.Sha256, hasher.DefaultAlgorithmId);
+        Assert.Contains(ApiKeyAlgorithmNaming.Md5, hasher.AlgorithmIds);
     }
 
     /// <summary>
@@ -121,7 +125,7 @@ public class StandardApiKeyHasherTests
     {
         var apiKey = new Base64UrlApiKeyGenerator("ptk_").Generate();
 
-        var md5 = new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>().Hash(apiKey);
+        var md5 = new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>(new ApiKeyAlgorithmNaming()).Hash(apiKey);
 
         var request = new DefaultHttpRequest(new DefaultHttpContext())
         {
@@ -303,5 +307,64 @@ public class MintingCallerFactoryTests
 
         Assert.Empty(caller.Subjects);
         Assert.True(caller.MayActAsAnySubject);
+    }
+}
+
+
+/// <summary>
+/// What a stored hash is recorded against: the algorithm, not the claim it travels in.
+/// </summary>
+public class ApiKeyAlgorithmNamingTests
+{
+    private static readonly ApiKeyAlgorithmNaming Naming = new();
+
+    [Fact]
+    public void TheV2026DigestsAreNamedAfterTheirAlgorithms()
+    {
+        Assert.Equal(ApiKeyAlgorithmNaming.Sha256, Naming.IdFor(SpecApiAuthStandardsV2026.Sha256));
+        Assert.Equal(ApiKeyAlgorithmNaming.Md5, Naming.IdFor(SpecApiAuthStandardsV2026.Md5));
+    }
+
+    /// <summary>The id names the algorithm, so it must not be the claim type it happens to travel in.</summary>
+    [Fact]
+    public void TheIdIsNotTheClaimType()
+    {
+        Assert.NotEqual(SpecApiAuthStandardsV2026.Sha256.ClaimType, Naming.IdFor(SpecApiAuthStandardsV2026.Sha256));
+        Assert.Equal("sha256", Naming.IdFor(SpecApiAuthStandardsV2026.Sha256));
+    }
+
+    [Fact]
+    public void TheHasherReportsTheAlgorithmNames()
+    {
+        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>(Naming);
+
+        Assert.Equal("sha256", hasher.DefaultAlgorithmId);
+        Assert.Equal(["sha256", "md5"], hasher.AlgorithmIds);
+    }
+
+    /// <summary>Hashing under the named algorithm still produces the claim the handler would emit.</summary>
+    [Fact]
+    public void HashingUnderTheNamedAlgorithmMatchesTheDigest()
+    {
+        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>(Naming);
+
+        Assert.Equal(SpecApiAuthStandardsV2026.Sha256.ToClaim("ptk_x").Value, hasher.Hash("ptk_x", "sha256"));
+        Assert.Equal(SpecApiAuthStandardsV2026.Md5.ToClaim("ptk_x").Value, hasher.Hash("ptk_x", "md5"));
+    }
+
+    /// <summary>An unmapped digest keeps its claim type, so two digests can never share one id by accident.</summary>
+    [Fact]
+    public void AnUnmappedDigestFallsBackToItsClaimType()
+    {
+        Assert.Equal("SomeOtherClaimType", Naming.IdFor("SomeOtherClaimType"));
+    }
+
+    [Fact]
+    public void TheMappingCanBeExtended()
+    {
+        var naming = new ApiKeyAlgorithmNaming();
+        naming.AlgorithmIdByClaimType["HasApiKeyBlake3Hash"] = "blake3";
+
+        Assert.Equal("blake3", naming.IdFor("HasApiKeyBlake3Hash"));
     }
 }
