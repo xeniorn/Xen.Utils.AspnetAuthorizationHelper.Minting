@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Util.ApiKeyMinting;
@@ -61,6 +61,7 @@ public static class DIHelper
         var subjectOptions = new SubjectSelectorExtractor.MyOptions();
         configureSubjects?.Invoke(subjectOptions);
         builder.Services.TryAddSingleton(new SubjectSelectorExtractor(subjectOptions));
+        builder.Services.TryAddSingleton<MintingCallerFactory<TStandard>>();
 
         builder.Services.TryAddSingleton<IApiKeyHasher, StandardApiKeyHasher<TApiKeyStandard>>();
         builder.Services.TryAddSingleton<IApiKeyGenerator>(_ => new Base64UrlApiKeyGenerator(keyPrefix));

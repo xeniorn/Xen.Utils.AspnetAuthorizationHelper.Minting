@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Internal;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -250,5 +250,58 @@ public class SubjectSelectorExtractorTests
 
         Assert.True(extractor.Holds(principal, new SubjectSelector("roles", "Billing")));
         Assert.False(extractor.Holds(principal, new SubjectSelector("roles", "Instruments")));
+    }
+}
+
+
+/// <summary>
+/// Who may act for a subject they do not hold.
+/// </summary>
+public class MintingCallerFactoryTests
+{
+    private static readonly MintingCallerFactory<TestAuthStandard> Sut = new(new SubjectSelectorExtractor());
+
+    private static ClaimsPrincipal PrincipalWith(params (string Type, string Value)[] claims)
+        => new(new ClaimsIdentity(claims.Select(x => new Claim(x.Type, x.Value)), "test"));
+
+    [Fact]
+    public void AnOrdinaryCallerHoldsOnlyItsOwnSubjects()
+    {
+        var caller = Sut.Create(PrincipalWith(("roles", "Billing")));
+
+        Assert.Equal([new SubjectSelector("roles", "Billing")], caller.Subjects);
+        Assert.False(caller.MayActAsAnySubject);
+    }
+
+    /// <summary>
+    /// The admin-like claim already passes every policy in the app through the override handler, so it lifts this
+    /// restriction too rather than leaving minting as the one place it does not reach.
+    /// </summary>
+    [Fact]
+    public void TheAdminLikeClaimLiftsTheSubjectRestriction()
+    {
+        var caller = Sut.Create(PrincipalWith(
+            ("roles", "Billing"), (TestAuthStandard.TestNamespace, "HasAdminLikeAccess")));
+
+        Assert.True(caller.MayActAsAnySubject);
+        Assert.Equal([new SubjectSelector("roles", "Billing")], caller.Subjects);
+    }
+
+    /// <summary>The claim only counts in the standard's own namespace, not by bare name.</summary>
+    [Fact]
+    public void TheSameNameInAnotherNamespaceDoesNot()
+    {
+        var caller = Sut.Create(PrincipalWith(("roles", "Billing"), ("someone_elses_ns", "HasAdminLikeAccess")));
+
+        Assert.False(caller.MayActAsAnySubject);
+    }
+
+    [Fact]
+    public void AnAdminHoldingNoRolesCanStillActForOthers()
+    {
+        var caller = Sut.Create(PrincipalWith((TestAuthStandard.TestNamespace, "HasAdminLikeAccess")));
+
+        Assert.Empty(caller.Subjects);
+        Assert.True(caller.MayActAsAnySubject);
     }
 }
