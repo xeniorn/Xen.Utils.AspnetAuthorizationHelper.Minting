@@ -52,37 +52,38 @@ public sealed class MintedKeyClaimExtractor<TStandard, TApiKeyStandard>(
     protected override async Task<IReadOnlyCollection<ClaimDefinition>> GetClaims(
         IReadOnlyCollection<ClaimsIdentity> identities, CancellationToken token = default)
     {
-        var presentedHashes = identities
+        // the standard may emit several digests of one key, and a stored key records which it was written under,
+        // so all of them are offered and the store decides which - if any - identifies a key it holds
+        var digestClaimTypes = ISpecApiAuthStandards.DigestsOf<TApiKeyStandard>()
+            .Select(x => x.ClaimType)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var presented = identities
             .SelectMany(x => x.Claims)
-            .Where(x => string.Equals(x.Type, TApiKeyStandard.DefaultClaimType, StringComparison.Ordinal))
-            .Select(x => x.Value)
-            .Distinct(StringComparer.Ordinal)
+            .Where(x => digestClaimTypes.Contains(x.Type))
+            .Select(x => new PresentedApiKeyDigest(x.Type, x.Value))
+            .Distinct()
             .ToArray();
 
-        if (presentedHashes.Length == 0) return [];
+        if (presented.Length == 0) return [];
 
-        var granted = new List<ClaimDefinition>();
+        var authorization = await authorizer.AuthorizeAsync(options.Scope, presented, token);
 
-        foreach (var hash in presentedHashes)
+        if (authorization.Status is MintedKeyStatus.NotFound)
         {
-            var authorization = await authorizer.AuthorizeAsync(options.Scope, hash, token);
-
-            if (authorization.Status is MintedKeyStatus.NotFound)
-            {
-                // not ours - very likely a key belonging to the configuration-backed extractor
-                continue;
-            }
-
-            if (authorization.Status is not MintedKeyStatus.Active)
-            {
-                _logger.LogInformation("Minted api key {keyId} presented but is {status}",
-                    authorization.Key?.Id, authorization.Status);
-                continue;
-            }
-
-            granted.AddRange(authorization.LivePermissions.Select(InternalPermissionClaims<TStandard>.ToClaim));
+            // not ours - very likely a key belonging to the configuration-backed extractor
+            return [];
         }
 
-        return granted;
+        if (authorization.Status is not MintedKeyStatus.Active)
+        {
+            _logger.LogInformation("Minted api key {keyId} presented but is {status}",
+                authorization.Key?.Id, authorization.Status);
+            return [];
+        }
+
+        return authorization.LivePermissions
+            .Select(InternalPermissionClaims<TStandard>.ToClaim)
+            .ToArray();
     }
 }

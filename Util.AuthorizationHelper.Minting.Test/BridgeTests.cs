@@ -58,11 +58,58 @@ public class StandardApiKeyHasherTests
     /// store written under another.
     /// </summary>
     [Fact]
-    public void AlgorithmIdDistinguishesTheDigests()
+    public void DefaultAlgorithmIdDistinguishesTheDigests()
     {
         Assert.NotEqual(
-            new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>().AlgorithmId,
-            new StandardApiKeyHasher<SpecApiAuthStandardsV2026>().AlgorithmId);
+            new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>().DefaultAlgorithmId,
+            new StandardApiKeyHasher<SpecApiAuthStandardsV2026>().DefaultAlgorithmId);
+    }
+
+    /// <summary>
+    /// A standard emitting several digests can hash under any of them, and each result equals the claim the
+    /// handler emits for that digest. That correspondence is what lets a key record which algorithm it used and
+    /// still be found from the identity later.
+    /// </summary>
+    [Fact]
+    public void EveryDigestOfTheStandardHashesToItsOwnClaim()
+    {
+        var apiKey = new Base64UrlApiKeyGenerator("ptk_").Generate();
+        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>();
+
+        var request = new DefaultHttpRequest(new DefaultHttpContext())
+        {
+            Headers = { [SpecApiAuthStandardsV2026.DefaultHeaderName] = apiKey }
+        };
+        var claims = SpecApiAuthHandler<SpecApiAuthStandardsV2026>
+            .GetAuthenticationTicketFromRequest(request, NullLogger.Instance)!
+            .Principal.Identities.Single().Claims.ToArray();
+
+        Assert.Equal(2, hasher.AlgorithmIds.Count);
+
+        foreach (var algorithmId in hasher.AlgorithmIds)
+        {
+            var emitted = claims.Single(x => x.Type == algorithmId).Value;
+            Assert.Equal(emitted, hasher.Hash(apiKey, algorithmId));
+        }
+    }
+
+    /// <summary>Naming a digest the standard does not emit is a mistake, not a silent fallback.</summary>
+    [Fact]
+    public void HashingUnderAnUnknownAlgorithm_Throws()
+    {
+        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => hasher.Hash("ptk_whatever", "sha3-nope"));
+    }
+
+    /// <summary>The default must be the primary digest, so new keys do not silently land on the legacy one.</summary>
+    [Fact]
+    public void DefaultAlgorithmIsThePrimaryDigest()
+    {
+        var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>();
+
+        Assert.Equal(SpecApiAuthStandardsV2026.Sha256.ClaimType, hasher.DefaultAlgorithmId);
+        Assert.Contains(SpecApiAuthStandardsV2026_Md5.MyDefaultClaimType, hasher.AlgorithmIds);
     }
 
     /// <summary>
