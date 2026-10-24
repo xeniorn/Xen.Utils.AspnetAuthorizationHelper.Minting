@@ -60,32 +60,39 @@ public sealed class MintedKeyClaimExtractor<TStandard, TApiKeyStandard>(
         var algorithmIdByClaimType = ISpecApiAuthStandards.DigestsOf<TApiKeyStandard>()
             .ToDictionary(x => x.ClaimType, naming.IdFor, StringComparer.Ordinal);
 
-        var presented = identities
-            .SelectMany(x => x.Claims)
-            .Where(x => algorithmIdByClaimType.ContainsKey(x.Type))
-            .Select(x => new PresentedApiKeyDigest(algorithmIdByClaimType[x.Type], x.Value))
-            .Distinct()
+        // One identity per key the caller sent (the scheme makes one per header value), so each key is resolved on
+        // its own and the claims are the union of every key that works. Pooling the digests of several keys into one
+        // lookup would let only the first match count.
+        var presentedKeys = identities
+            .Select(identity => identity.Claims
+                .Where(x => algorithmIdByClaimType.ContainsKey(x.Type))
+                .Select(x => new PresentedApiKeyDigest(algorithmIdByClaimType[x.Type], x.Value))
+                .Distinct()
+                .ToArray())
+            .Where(digests => digests.Length > 0)
             .ToArray();
 
-        if (presented.Length == 0) return [];
-
-        var authorization = await authorizer.AuthorizeAsync(options.Scope, presented, token);
-
-        if (authorization.Status is MintedKeyStatus.NotFound)
+        var claims = new HashSet<ClaimDefinition>();
+        foreach (var presented in presentedKeys)
         {
-            // not ours - very likely a key belonging to the configuration-backed extractor
-            return [];
+            var authorization = await authorizer.AuthorizeAsync(options.Scope, presented, token);
+
+            if (authorization.Status is MintedKeyStatus.NotFound)
+            {
+                // not ours - very likely a key belonging to the configuration-backed extractor
+                continue;
+            }
+
+            if (authorization.Status is not MintedKeyStatus.Active)
+            {
+                _logger.LogInformation("Minted api key {keyId} presented but is {status}",
+                    authorization.Key?.Id, authorization.Status);
+                continue;
+            }
+
+            claims.UnionWith(authorization.LivePermissions.Select(InternalPermissionClaims<TStandard>.ToClaim));
         }
 
-        if (authorization.Status is not MintedKeyStatus.Active)
-        {
-            _logger.LogInformation("Minted api key {keyId} presented but is {status}",
-                authorization.Key?.Id, authorization.Status);
-            return [];
-        }
-
-        return authorization.LivePermissions
-            .Select(InternalPermissionClaims<TStandard>.ToClaim)
-            .ToArray();
+        return claims;
     }
 }
