@@ -41,6 +41,9 @@ The admin-like claim of `TStandard`, if it declares one, is added to the never-m
 It belongs in code rather than in a grants table, so that no amount of later data entry can hand out permanent
 admin.
 
+Keys minted with `KeyValidity.FollowsMinter` (personal delegations, see `Xen.Utils.ApiKeyMinting`) also need an
+`IMinterSubjectSource`, registered as a singleton (the authorizer is one). Without it those keys carry nothing.
+
 ## Subjects default to app roles
 
 Grants are written against a claim type and value, and the default allow-list is `roles` alone. Roles are named by

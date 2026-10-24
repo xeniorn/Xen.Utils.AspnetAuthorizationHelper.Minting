@@ -1,6 +1,5 @@
 ﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Internal;
 using Microsoft.Extensions.Logging.Abstractions;
 using Util.ApiKeyMinting;
 using Util.AuthorizationHelper.Authentication;
@@ -21,10 +20,8 @@ public class StandardApiKeyHasherTests
     private static string PrimaryClaimValueFromHandler<TStandard>(string apiKey)
         where TStandard : ISpecApiAuthStandards
     {
-        var request = new DefaultHttpRequest(new DefaultHttpContext())
-        {
-            Headers = { [TStandard.DefaultHeaderName] = apiKey }
-        };
+        var request = new DefaultHttpContext().Request;
+        request.Headers[TStandard.DefaultHeaderName] = apiKey;
 
         var ticket = SpecApiAuthHandler<TStandard>.GetAuthenticationTicketFromRequest(request, NullLogger.Instance);
 
@@ -76,10 +73,8 @@ public class StandardApiKeyHasherTests
         var apiKey = new Base64UrlApiKeyGenerator("ptk_").Generate();
         var hasher = new StandardApiKeyHasher<SpecApiAuthStandardsV2026>(new ApiKeyAlgorithmNaming());
 
-        var request = new DefaultHttpRequest(new DefaultHttpContext())
-        {
-            Headers = { [SpecApiAuthStandardsV2026.DefaultHeaderName] = apiKey }
-        };
+        var request = new DefaultHttpContext().Request;
+        request.Headers[SpecApiAuthStandardsV2026.DefaultHeaderName] = apiKey;
         var claims = SpecApiAuthHandler<SpecApiAuthStandardsV2026>
             .GetAuthenticationTicketFromRequest(request, NullLogger.Instance)!
             .Principal.Identities.Single().Claims.ToArray();
@@ -127,10 +122,8 @@ public class StandardApiKeyHasherTests
 
         var md5 = new StandardApiKeyHasher<SpecApiAuthStandardsV2026_Md5>(new ApiKeyAlgorithmNaming()).Hash(apiKey);
 
-        var request = new DefaultHttpRequest(new DefaultHttpContext())
-        {
-            Headers = { [SpecApiAuthStandardsV2026.DefaultHeaderName] = apiKey }
-        };
+        var request = new DefaultHttpContext().Request;
+        request.Headers[SpecApiAuthStandardsV2026.DefaultHeaderName] = apiKey;
         var ticket = SpecApiAuthHandler<SpecApiAuthStandardsV2026>
             .GetAuthenticationTicketFromRequest(request, NullLogger.Instance);
 
